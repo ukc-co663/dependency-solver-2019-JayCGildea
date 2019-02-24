@@ -133,9 +133,7 @@ def main():
 
     commands, cost = iterative_deepening(initial, 100000)
     commands.reverse()
-    print(commands)
-    with open("commands.json", "w+") as f:
-        f.write(json.dumps(commands))
+    print(json.dumps(commands))
 
 
 def iterative_deepening(state, max_depth):
