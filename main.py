@@ -29,8 +29,8 @@ operators = {
 constraintsPositive = []
 constraintsNegative = []
 
-
 def main():
+    print("Building cnfs")
     for packageIdx, package in enumerate(repoInput):
         repo[packageIdx]['cnf'] = []
         try:
@@ -86,6 +86,7 @@ def main():
 
     initial = []
 
+    print("Building initial")
     for initialIn in initialInput:
         matchObj = re.match(matchString, initialIn)
         if not matchObj:
@@ -103,12 +104,12 @@ def main():
             if does_match(val['name'], val['version'], operator, name, version):
                 initial.append(val)
                 found = True
-                break
 
         if not found:
-            raise Exception("Input: " + initialIn + " not found")
+            print(initialIn)
+            raise Exception("Input not found")
 
-
+    print("Building constraints")
     for constraintIn in constraintsInput:
 
         matchObj = re.match(matchString, constraintIn[1:])
@@ -119,88 +120,105 @@ def main():
         version = matchObj.group(3)
 
         found = False
-        for val in repo:
+        tempPos = []
+        for idx, val in enumerate(repo):
             if does_match(val['name'], val['version'], operator, name, version):
                 if constraintIn[0] == '+':
-                    constraintsPositive.append(val)
+                    tempPos.append(idx+1)
                 else:
-                    constraintsNegative.append(val)
+                    constraintsNegative.append([-(idx+1)])
                 found = True
-                break
+
+        constraintsPositive.append(tempPos)
 
         if not found:
-            raise Exception("Constraint: " + constraintIn + " not found")
+            print(constraintIn)
+            raise Exception("Constraint: not found")
 
-    commands, cost = iterative_deepening(initial, 100000)
+    commands, cost = iterative_deepening(initial, 1000000000)
     commands.reverse()
+    print("Cost: " + str(cost))
     print(json.dumps(commands))
 
 
-def iterative_deepening(state, max_depth):
-    for i in range(max_depth):
-        commands, cost = depth_first(state, i)
+def iterative_deepening(state, max_cost):
+    for i in (2**x for x in range(0, max_cost)):
+        commands, cost = depth_first(state, i, [])
         if commands is not None:
             return commands, cost
 
 
-def depth_first(state, depth):
-    if depth <= 0:
+def depth_first(state, max_cost, visitedStates):
+    if max_cost < 0:
         return None, 0
 
     if is_final(state):
         return [], 0
 
-    possibleAdd, possibleRemove = get_possible(state)
+    possibleAdd, possibleRemove = get_possible(state, visitedStates)
 
+    minCommands, minCost = None, 0
 
     for add in possibleAdd:
         tempState = state[:]
         tempState.append(add)
-        commands, cost = depth_first(tempState, depth-1)
-        if commands is not None:
+        tempVisited = visitedStates[:]
+        tempVisited.append(tempState)
+        commands, cost = depth_first(tempState, max_cost-add['size'], tempVisited)
+        if commands is not None and minCost < cost + add['size']:
             commands.append("+" + add['name'] + "=" + add['version'])
-            return commands, cost + add['size']
+            minCommands, minCost = commands, cost + add['size']
 
     for remove in possibleRemove:
         tempState = state[:]
         tempState.remove(remove)
-        commands, cost = depth_first(tempState, depth - 1)
-        if commands is not None:
+        tempVisited = visitedStates[:]
+        tempVisited.append(tempState)
+        commands, cost = depth_first(tempState, max_cost-1000000, tempVisited)
+        if commands is not None and minCost < cost + 1000000:
             commands.append("+" + remove['name'] + "=" + remove['version'])
-            return commands, cost + 1000000
+            minCommands, minCost = commands, cost + 1000000
 
-    return None, 0
+    return minCommands, minCost
 
 
-def get_possible(state):
+def get_possible(state, visitedStates):
     possibleAdd = []
     possibleRemove = []
     for package in repo:
         temp = state[:]
         if package in state:
             temp.remove(package)
-            if is_valid(temp):
+            if is_valid(temp) and temp not in visitedStates:
                 possibleRemove.append(package)
         else:
             temp.append(package)
-            if is_valid(temp):
+            if is_valid(temp) and temp not in visitedStates:
                 possibleAdd.append(package)
 
     return possibleAdd, possibleRemove
 
 
-def is_valid(state):
+def build_cnf(state):
     cnf = []
     for idx, package in enumerate(repo):
         if package in state:
             cnf.extend(package['cnf'])
         else:
             cnf.append([-(idx+1)])
+    return cnf
+
+
+def is_valid(state):
+    cnf = build_cnf(state)
     return type(pycosat.solve(cnf)) is list
 
 
 def is_final(state):
-    return all(k in state for k in constraintsPositive) and all(k not in state for k in constraintsNegative)
+    cnf = build_cnf(state)
+    cnf.extend(constraintsPositive)
+    cnf.extend(constraintsNegative)
+    return type(pycosat.solve(cnf)) is list
 
 
 def does_match(name, version, operator, name2, version2):
