@@ -15,7 +15,6 @@ with open(sys.argv[2], 'r') as f:
 with open(sys.argv[3], 'r') as f:
     constraintsInput = json.load(f)
 
-
 matchString = r'(\w*)(\W*)([\w\.]*)'
 
 operators = {
@@ -29,8 +28,8 @@ operators = {
 constraintsPositive = []
 constraintsNegative = []
 
+
 def main():
-    print("Building cnfs")
     for packageIdx, package in enumerate(repoInput):
         repo[packageIdx]['cnf'] = []
         try:
@@ -53,7 +52,7 @@ def main():
 
                     for idx, val in enumerate(repoInput):
                         if does_match(val['name'], val['version'], operator, name, version):
-                            temp.append(idx+1)
+                            temp.append(idx + 1)
 
                     sats.append(temp)
 
@@ -82,11 +81,10 @@ def main():
         except KeyError:
             pass
 
-        repo[packageIdx]['cnf'].append([packageIdx+1])
+        repo[packageIdx]['cnf'].append([packageIdx + 1])
 
     initial = []
 
-    print("Building initial")
     for initialIn in initialInput:
         matchObj = re.match(matchString, initialIn)
         if not matchObj:
@@ -109,7 +107,6 @@ def main():
             print(initialIn)
             raise Exception("Input not found")
 
-    print("Building constraints")
     for constraintIn in constraintsInput:
 
         matchObj = re.match(matchString, constraintIn[1:])
@@ -124,9 +121,9 @@ def main():
         for idx, val in enumerate(repo):
             if does_match(val['name'], val['version'], operator, name, version):
                 if constraintIn[0] == '+':
-                    tempPos.append(idx+1)
+                    tempPos.append(idx + 1)
                 else:
-                    constraintsNegative.append([-(idx+1)])
+                    constraintsNegative.append([-(idx + 1)])
                 found = True
 
         constraintsPositive.append(tempPos)
@@ -135,36 +132,36 @@ def main():
             print(constraintIn)
             raise Exception("Constraint: not found")
 
-    commands, cost = iterative_deepening(initial, 1000000000)
+    commands, cost = iterative_deepening(initial, 1000000000, len(repo) * 10)
     commands.reverse()
-    print("Cost: " + str(cost))
     print(json.dumps(commands))
 
 
-def iterative_deepening(state, max_cost):
-    for i in (2**x for x in range(0, max_cost)):
-        commands, cost = depth_first(state, i, [])
+def iterative_deepening(state, max_cost, max_depth):
+    for i in (10 ** x for x in range(0, max_cost)):
+        commands, cost = depth_first(state, i, max_depth, [])
         if commands is not None:
             return commands, cost
 
 
-def depth_first(state, max_cost, visitedStates):
+def depth_first(state, max_cost, max_depth, visited_states):
     if max_cost < 0:
+        return None, 0
+
+    if max_depth < 0:
         return None, 0
 
     if is_final(state):
         return [], 0
 
-    possibleAdd, possibleRemove = get_possible(state, visitedStates)
+    possibleAdd, possibleRemove = get_possible(state, visited_states)
 
     minCommands, minCost = None, 0
 
     for add in possibleAdd:
         tempState = state[:]
         tempState.append(add)
-        tempVisited = visitedStates[:]
-        tempVisited.append(tempState)
-        commands, cost = depth_first(tempState, max_cost-add['size'], tempVisited)
+        commands, cost = depth_first(tempState, max_cost - add['size'], max_depth - 1, visited_states)
         if commands is not None and minCost < cost + add['size']:
             commands.append("+" + add['name'] + "=" + add['version'])
             minCommands, minCost = commands, cost + add['size']
@@ -172,9 +169,7 @@ def depth_first(state, max_cost, visitedStates):
     for remove in possibleRemove:
         tempState = state[:]
         tempState.remove(remove)
-        tempVisited = visitedStates[:]
-        tempVisited.append(tempState)
-        commands, cost = depth_first(tempState, max_cost-1000000, tempVisited)
+        commands, cost = depth_first(tempState, max_cost - 1000000, max_depth - 1, visited_states)
         if commands is not None and minCost < cost + 1000000:
             commands.append("+" + remove['name'] + "=" + remove['version'])
             minCommands, minCost = commands, cost + 1000000
@@ -191,10 +186,12 @@ def get_possible(state, visitedStates):
             temp.remove(package)
             if is_valid(temp) and temp not in visitedStates:
                 possibleRemove.append(package)
+                visitedStates.append(temp)
         else:
             temp.append(package)
             if is_valid(temp) and temp not in visitedStates:
                 possibleAdd.append(package)
+                visitedStates.append(temp)
 
     return possibleAdd, possibleRemove
 
@@ -205,7 +202,7 @@ def build_cnf(state):
         if package in state:
             cnf.extend(package['cnf'])
         else:
-            cnf.append([-(idx+1)])
+            cnf.append([-(idx + 1)])
     return cnf
 
 
