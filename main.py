@@ -171,7 +171,7 @@ def depth_first(state, max_cost, max_depth, visited_states):
         tempState.remove(remove)
         commands, cost = depth_first(tempState, max_cost - 1000000, max_depth - 1, visited_states)
         if commands is not None and minCost > cost + 1000000:
-            commands.append("+" + remove['name'] + "=" + remove['version'])
+            commands.append("-" + remove['name'] + "=" + remove['version'])
             minCommands, minCost = commands, cost + 1000000
 
     return minCommands, minCost
