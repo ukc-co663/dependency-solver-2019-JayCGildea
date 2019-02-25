@@ -134,7 +134,6 @@ def main():
 
     commands, cost = iterative_deepening(initial, 1000000000, len(repo) * 10)
     commands.reverse()
-    print(str(cost))
     print(json.dumps(commands))
 
 
