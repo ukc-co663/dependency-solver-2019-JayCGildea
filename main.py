@@ -134,11 +134,12 @@ def main():
 
     commands, cost = iterative_deepening(initial, 1000000000, len(repo) * 10)
     commands.reverse()
+    print(str(cost))
     print(json.dumps(commands))
 
 
 def iterative_deepening(state, max_cost, max_depth):
-    for i in (10 ** x for x in range(0, max_cost)):
+    for i in (2 ** x for x in range(0, max_cost)):
         commands, cost = depth_first(state, i, max_depth, [])
         if commands is not None:
             return commands, cost
@@ -156,13 +157,13 @@ def depth_first(state, max_cost, max_depth, visited_states):
 
     possibleAdd, possibleRemove = get_possible(state, visited_states)
 
-    minCommands, minCost = None, 0
+    minCommands, minCost = None, 1000000000000
 
     for add in possibleAdd:
         tempState = state[:]
         tempState.append(add)
         commands, cost = depth_first(tempState, max_cost - add['size'], max_depth - 1, visited_states)
-        if commands is not None and minCost < cost + add['size']:
+        if commands is not None and minCost > cost + add['size']:
             commands.append("+" + add['name'] + "=" + add['version'])
             minCommands, minCost = commands, cost + add['size']
 
@@ -170,7 +171,7 @@ def depth_first(state, max_cost, max_depth, visited_states):
         tempState = state[:]
         tempState.remove(remove)
         commands, cost = depth_first(tempState, max_cost - 1000000, max_depth - 1, visited_states)
-        if commands is not None and minCost < cost + 1000000:
+        if commands is not None and minCost > cost + 1000000:
             commands.append("+" + remove['name'] + "=" + remove['version'])
             minCommands, minCost = commands, cost + 1000000
 
