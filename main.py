@@ -1,6 +1,7 @@
 import sys
 import json
 from packaging import version
+from distutils.version import LooseVersion, StrictVersion
 import re
 import itertools
 import pycosat
@@ -18,18 +19,18 @@ with open(sys.argv[3], 'r') as f:
 matchString = r'(\w*)(\W*)([\w\.]*)'
 
 operators = {
-    "=": (lambda x, y: version.parse(x) == version.parse(y)),
-    ">": (lambda x, y: version.parse(x) > version.parse(y)),
-    ">=": (lambda x, y: version.parse(x) >= version.parse(y)),
-    "<": (lambda x, y: version.parse(x) < version.parse(y)),
-    "<=": (lambda x, y: version.parse(x) <= version.parse(y)),
+    "=": (lambda x, y: LooseVersion(x) == LooseVersion(y)),
+    ">": (lambda x, y: LooseVersion(x) > LooseVersion(y)),
+    ">=": (lambda x, y: LooseVersion(x) >= LooseVersion(y)),
+    "<": (lambda x, y: LooseVersion(x) < LooseVersion(y)),
+    "<=": (lambda x, y: LooseVersion(x) <= LooseVersion(y)),
 }
 
 constraintsPositive = []
 constraintsNegative = []
 
-
 def main():
+
     for packageIdx, package in enumerate(repoInput):
         repo[packageIdx]['cnf'] = []
         try:
@@ -132,13 +133,15 @@ def main():
             print(constraintIn)
             raise Exception("Constraint: not found")
 
-    commands, cost = iterative_deepening(initial, 1000000000, len(repo) * 10)
+    commands, cost = iterative_deepening(initial, 100000000000000000, len(repo)*2)
     commands.reverse()
     print(json.dumps(commands))
 
 
 def iterative_deepening(state, max_cost, max_depth):
-    for i in (2 ** x for x in range(0, max_cost)):
+    seq = [x['size'] for x in repo]
+    for i in (x*20 for x in range(min(seq), max_cost)):
+        print("Depth: " + str(i))
         commands, cost = depth_first(state, i, max_depth, [])
         if commands is not None:
             return commands, cost
@@ -152,6 +155,7 @@ def depth_first(state, max_cost, max_depth, visited_states):
         return None, 0
 
     if is_final(state):
+        print("Got final")
         return [], 0
 
     possibleAdd, possibleRemove = get_possible(state, visited_states)
@@ -166,13 +170,14 @@ def depth_first(state, max_cost, max_depth, visited_states):
             commands.append("+" + add['name'] + "=" + add['version'])
             minCommands, minCost = commands, cost + add['size']
 
-    for remove in possibleRemove:
-        tempState = state[:]
-        tempState.remove(remove)
-        commands, cost = depth_first(tempState, max_cost - 1000000, max_depth - 1, visited_states)
-        if commands is not None and minCost > cost + 1000000:
-            commands.append("-" + remove['name'] + "=" + remove['version'])
-            minCommands, minCost = commands, cost + 1000000
+    if max_cost - 1000000 > 0:
+        for remove in possibleRemove:
+            tempState = state[:]
+            tempState.remove(remove)
+            commands, cost = depth_first(tempState, max_cost - 1000000, max_depth - 1, visited_states)
+            if commands is not None and minCost > cost + 1000000:
+                commands.append("-" + remove['name'] + "=" + remove['version'])
+                minCommands, minCost = commands, cost + 1000000
 
     return minCommands, minCost
 
