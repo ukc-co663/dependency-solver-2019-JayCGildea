@@ -30,6 +30,7 @@ constraintsNegative = []
 
 repoDict = {}
 
+
 def build_packages_cnf(package):
     if 'cnf' not in package:
         package['cnf'] = []
@@ -84,7 +85,6 @@ def build_packages_cnf(package):
                     pass
 
         package['cnf'].append([package['id']])
-        repoUsable.append(package)
 
 
 def main():
