@@ -1,6 +1,5 @@
 import sys
 import json
-from packaging import version
 from distutils.version import LooseVersion, StrictVersion
 import re
 import itertools
@@ -31,13 +30,8 @@ constraintsNegative = []
 
 repoDict = {}
 
-counter = 0
-
-
 def build_packages_cnf(package):
-    global counter
     if 'cnf' not in package:
-        counter+=1
         package['cnf'] = []
         if 'depends' in package:
             for depends in package['depends']:
@@ -90,6 +84,8 @@ def build_packages_cnf(package):
                     pass
 
         package['cnf'].append([package['id']])
+        repoUsable.append(package)
+
 
 def main():
     for idx, package in enumerate(repoInput):
@@ -169,14 +165,27 @@ def iterative_deepening(state, max_cost, max_depth):
 
 def depth_first(state, max_cost, max_depth, visited_states):
 
+    if state in visited_states:
+        return None, 0
+
+    if max_cost < 0:
+        return None, 0
+
     if max_cost < 0:
         return None, 0
 
     if max_depth < 0:
         return None, 0
 
-    if is_final(state):
+    cnf = build_cnf(state)
+
+    if not is_valid(cnf):
+        return None, 0
+
+    if is_final(cnf):
         return [], 0
+
+    visited_states.append(state)
 
     possibleAdd, possibleRemove = get_possible(state, visited_states)
 
@@ -201,24 +210,20 @@ def depth_first(state, max_cost, max_depth, visited_states):
 
     return minCommands, minCost
 
+counter = 0
+
 
 def get_possible(state, visitedStates):
+
     possibleAdd = []
     possibleRemove = []
     for name, packages in repoDict.items():
         for package in packages:
             if 'cnf' in package:
-                temp = state[:]
                 if package in state:
-                    temp.remove(package)
-                    if is_valid(temp) and temp not in visitedStates:
-                        possibleRemove.append(package)
-                        visitedStates.append(temp)
+                    possibleRemove.append(package)
                 else:
-                    temp.append(package)
-                    if is_valid(temp) and temp not in visitedStates:
-                        possibleAdd.append(package)
-                        visitedStates.append(temp)
+                    possibleAdd.append(package)
 
     return possibleAdd, possibleRemove
 
@@ -234,13 +239,11 @@ def build_cnf(state):
     return cnf
 
 
-def is_valid(state):
-    cnf = build_cnf(state)
+def is_valid(cnf):
     return type(pycosat.solve(cnf)) is list
 
 
-def is_final(state):
-    cnf = build_cnf(state)
+def is_final(cnf):
     cnf.extend(constraintsPositive)
     cnf.extend(constraintsNegative)
     return type(pycosat.solve(cnf)) is list
