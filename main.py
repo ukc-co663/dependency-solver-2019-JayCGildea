@@ -1,9 +1,11 @@
 import sys
 import json
-from distutils.version import LooseVersion, StrictVersion
+from distutils.version import LooseVersion
 import re
+from queue import PriorityQueue
 import itertools
 import pycosat
+import gc
 
 with open(sys.argv[1], 'r') as f:
     repoInput = json.load(f)
@@ -28,15 +30,26 @@ operators = {
 constraintsPositive = []
 constraintsNegative = []
 
+cnf = []
+finalStates = []
+initialState = set()
+
 repoDict = {}
+repoIdDict = {}
+counter = 1
 
 
 def build_packages_cnf(package):
+    global counter
     if 'cnf' not in package:
         package['cnf'] = []
+        package['id'] = counter
+        counter += 1
+        repoIdDict[package['id']] = package
+
         if 'depends' in package:
             for depends in package['depends']:
-                sats = []
+                temp = [-package['id']]
                 for depend in depends:
                     # Loop over repo and enumerate every package that satisifies this depend
                     matchObj = re.match(matchString, depend)
@@ -50,19 +63,16 @@ def build_packages_cnf(package):
                         operator = None
                         version = None
 
-                    temp = []
                     try:
                         for val in repoDict[name]:
                             if does_match(val['version'], operator, version):
-                                temp.append(val['id'])
                                 build_packages_cnf(val)
+                                temp.append(val['id'])
+
                     except KeyError:
                         pass
 
-                    sats.append(temp)
-
-                mul = map(list, list(itertools.product(*sats)))
-                package['cnf'].extend(mul)
+                cnf.append(temp)
 
         if 'conflicts' in package:
             for conflict in package['conflicts']:
@@ -80,22 +90,21 @@ def build_packages_cnf(package):
                 try:
                     for val in repoDict[name]:
                         if does_match(val['version'], operator, version):
-                            package['cnf'].append([-val['id']])
+                            build_packages_cnf(val)
+                            cnf.append([-package['id'], -val['id']])
+
                 except KeyError:
                     pass
 
-        package['cnf'].append([package['id']])
+        cnf.append([-package['id']])
 
 
 def main():
     for idx, package in enumerate(repoInput):
-        package['id'] = idx + 1
         if package['name'] in repoDict:
             repoDict[package['name']].append(package)
         else:
             repoDict[package['name']] = [package]
-
-    initial = []
 
     for initialIn in initialInput:
         matchObj = re.match(matchString, initialIn)
@@ -113,10 +122,9 @@ def main():
         for val in repoDict[name]:
 
             if does_match(val['version'], operator, version):
-                initial.append(val)
-                found = True
+                initialState.add(counter)
                 build_packages_cnf(val)
-                break
+                found = True
 
         if not found:
             print(initialIn)
@@ -136,117 +144,134 @@ def main():
         for val in repoDict[name]:
             if does_match(val['version'], operator, version):
                 if constraintIn[0] == '+':
+                    build_packages_cnf(val)
                     tempPos.append(val['id'])
-                    build_packages_cnf(val)
                 else:
-                    constraintsNegative.append([-val['id']])
                     build_packages_cnf(val)
+                    constraintsNegative.append(-val['id'])
                 found = True
-
-        constraintsPositive.append(tempPos)
+        if constraintIn[0] == '+':
+            constraintsPositive.append(tempPos)
 
         if not found:
             print(constraintIn)
             raise Exception("Constraint: not found")
 
-    commands, cost = iterative_deepening(initial, 100000000000, len(repo)*2)
-    commands.reverse()
+    posConstrains = map(list, list(itertools.product(*constraintsPositive)))
+
+    for pos in posConstrains:
+        pos.extend(constraintsNegative)
+        finalStates.append(pos)
+
+    commands = depth_first(frozenset(initialState))
 
     print(json.dumps(commands))
 
+def depth_first(state):
 
-def iterative_deepening(state, max_cost, max_depth):
-    seq = [x['size'] for x in repo]
-    for i in (x*10 for x in range(100001, max_cost, round(4.01*min(seq)+50000))):
-        commands, cost = depth_first(state, i, max_depth, [])
-        if commands is not None:
-            return commands, cost
+    queue = PriorityQueue()
+    queue.put((0, 1000-len([]), state, []))
+    commands = []
 
-
-def depth_first(state, max_cost, max_depth, visited_states):
-
-    if state in visited_states:
-        return None, 0
-
-    if max_cost < 0:
-        return None, 0
-
-    if max_cost < 0:
-        return None, 0
-
-    if max_depth < 0:
-        return None, 0
-
-    cnf = build_cnf(state)
-
-    if not is_valid(cnf):
-        return None, 0
-
-    if is_final(cnf):
-        return [], 0
-
-    visited_states.append(state)
-
-    possibleAdd, possibleRemove = get_possible(state, visited_states)
-
-    minCommands, minCost = None, 1000000000000
-
-    for add in possibleAdd:
-        tempState = state[:]
-        tempState.append(add)
-        commands, cost = depth_first(tempState, max_cost - add['size'], max_depth - 1, visited_states)
-        if commands is not None and minCost > cost + add['size']:
-            commands.append("+" + add['name'] + "=" + add['version'])
-            minCommands, minCost = commands, cost + add['size']
-
-    if max_cost - 1000000 > 0:
-        for remove in possibleRemove:
-            tempState = state[:]
-            tempState.remove(remove)
-            commands, cost = depth_first(tempState, max_cost - 1000000, max_depth - 1, visited_states)
-            if commands is not None and minCost > cost + 1000000:
-                commands.append("-" + remove['name'] + "=" + remove['version'])
-                minCommands, minCost = commands, cost + 1000000
-
-    return minCommands, minCost
-
-counter = 0
+    visited = dict()
+    visited[state] = 0
 
 
-def get_possible(state, visitedStates):
+    while not queue.empty():
+        gc.collect()
+        last_cost, length, current, commands = queue.get()
 
-    possibleAdd = []
-    possibleRemove = []
-    for name, packages in repoDict.items():
-        for package in packages:
-            if 'cnf' in package:
-                if package in state:
-                    possibleRemove.append(package)
-                else:
-                    possibleAdd.append(package)
+        if is_final(current):
+            break
 
-    return possibleAdd, possibleRemove
+        transitions = get_possible(current)
+
+        for transition in transitions:
+            newState = set(current)
+            if -transition in newState:
+                newState.remove(-transition)
+            else:
+                newState.add(transition)
+
+            newState = frozenset(newState)
+            if not is_valid(newState):
+                continue
+
+            if transition > 0:
+                new_cost = visited[current] + repoIdDict[transition]['size']
+            else:
+                new_cost = visited[current] + 1000000
+
+            if newState not in visited or visited[newState] > new_cost:
+                visited[newState] = new_cost
+                prio = new_cost + get_difference(newState)
+                newCommands = commands[:]
+                name = repoIdDict[abs(transition)]['name'] + "=" + repoIdDict[abs(transition)]['version']
+                newCommands.append("+" + name if transition > 0 else "-" + name)
+                queue.put((prio, 1000-len(newCommands), newState, newCommands))
+
+    return commands
+
+
+
+def get_possible(state):
+
+    transitions = []
+    for id, package in repoIdDict.items():
+        transitions.append(-id if id in state else id)
+
+    return transitions
 
 
 def build_cnf(state):
-    cnf = []
-    for key, packages in repoDict.items():
-        for package in packages:
-            if package in state:
-                cnf.extend(package['cnf'])
+    tempCnf = cnf[:]
+
+    for package in state:
+        tempCnf.remove([-package])
+        tempCnf.append([package])
+
+    return tempCnf
+
+
+def is_valid(state):
+    return type(pycosat.solve(build_cnf(state))) is list
+
+
+def get_difference(state):
+
+    min_cost = 1000000000000000000
+
+    for finalState in finalStates:
+        cost = 0
+        for p in finalState:
+            if p > 0:
+                if p not in state:
+                    cost += repoIdDict[p]['size']
             else:
-                cnf.append([-package['id']])
-    return cnf
+                if -p in state:
+                    cost += 1000000
+        if cost < min_cost:
+            min_cost = cost
+
+    return min_cost
 
 
-def is_valid(cnf):
-    return type(pycosat.solve(cnf)) is list
+def is_final(state):
+    for finalState in finalStates:
+        if is_final_inner(finalState, state):
+            return True
+    return False
 
 
-def is_final(cnf):
-    cnf.extend(constraintsPositive)
-    cnf.extend(constraintsNegative)
-    return type(pycosat.solve(cnf)) is list
+def is_final_inner(finalState, state):
+    for p in finalState:
+        if p > 0:
+            if p not in state:
+                return False
+        else:
+            if -p in state:
+                return False
+    return True
 
 
 def does_match(version, operator, version2):
