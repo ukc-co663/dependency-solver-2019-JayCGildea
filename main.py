@@ -189,10 +189,7 @@ def depth_first(state):
         if is_final(current):
             break
 
-        print(get_difference(current))
-
         transitions = get_possible(current)
-        print("Transitions: " + str(len(transitions)))
 
         for idx, transition in enumerate(transitions):
             #print(idx)
