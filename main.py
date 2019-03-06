@@ -6,6 +6,7 @@ from queue import PriorityQueue
 import itertools
 import pycosat
 import gc
+from pysat.solvers import Glucose3
 
 with open(sys.argv[1], 'r') as f:
     repoInput = json.load(f)
@@ -30,7 +31,7 @@ operators = {
 constraintsPositive = []
 constraintsNegative = []
 
-cnf = []
+cnf = set()
 finalStates = []
 initialState = set()
 
@@ -38,6 +39,7 @@ repoDict = {}
 repoIdDict = {}
 counter = 1
 
+g = Glucose3()
 
 def build_packages_cnf(package):
     global counter
@@ -72,7 +74,7 @@ def build_packages_cnf(package):
                     except KeyError:
                         pass
 
-                cnf.append(temp)
+                g.add_clause(temp)
 
         if 'conflicts' in package:
             for conflict in package['conflicts']:
@@ -91,12 +93,10 @@ def build_packages_cnf(package):
                     for val in repoDict[name]:
                         if does_match(val['version'], operator, version):
                             build_packages_cnf(val)
-                            cnf.append([-package['id'], -val['id']])
+                            g.add_clause([-package['id'], -val['id']])
 
                 except KeyError:
                     pass
-
-        cnf.append([-package['id']])
 
 
 def main():
@@ -107,6 +107,7 @@ def main():
             repoDict[package['name']] = [package]
 
     for initialIn in initialInput:
+
         matchObj = re.match(matchString, initialIn)
         if not matchObj:
             continue
@@ -122,8 +123,8 @@ def main():
         for val in repoDict[name]:
 
             if does_match(val['version'], operator, version):
-                initialState.add(counter)
                 build_packages_cnf(val)
+                initialState.add(val['id'])
                 found = True
 
         if not found:
@@ -163,9 +164,14 @@ def main():
         pos.extend(constraintsNegative)
         finalStates.append(pos)
 
+    for id in repoIdDict:
+        if id not in initialState:
+            initialState.add(-id)
+
     commands = depth_first(frozenset(initialState))
 
     print(json.dumps(commands))
+
 
 def depth_first(state):
 
@@ -176,7 +182,6 @@ def depth_first(state):
     visited = dict()
     visited[state] = 0
 
-
     while not queue.empty():
         gc.collect()
         last_cost, length, current, commands = queue.get()
@@ -184,14 +189,17 @@ def depth_first(state):
         if is_final(current):
             break
 
-        transitions = get_possible(current)
+        print(get_difference(current))
 
-        for transition in transitions:
+        transitions = get_possible(current)
+        print("Transitions: " + str(len(transitions)))
+
+        for idx, transition in enumerate(transitions):
+            #print(idx)
             newState = set(current)
-            if -transition in newState:
-                newState.remove(-transition)
-            else:
-                newState.add(transition)
+
+            newState.remove(-transition)
+            newState.add(transition)
 
             newState = frozenset(newState)
             if not is_valid(newState):
@@ -213,7 +221,6 @@ def depth_first(state):
     return commands
 
 
-
 def get_possible(state):
 
     transitions = []
@@ -222,19 +229,19 @@ def get_possible(state):
 
     return transitions
 
-
 def build_cnf(state):
-    tempCnf = cnf[:]
+    tempCnf = set(cnf)
 
     for package in state:
-        tempCnf.remove([-package])
-        tempCnf.append([package])
+        tempCnf.remove(tuple([-package]))
+        tempCnf.add(tuple([package]))
 
-    return tempCnf
+    return [list(x) for x in tempCnf]
 
 
 def is_valid(state):
-    return type(pycosat.solve(build_cnf(state))) is list
+    return g.solve(assumptions=state)
+    #return type(pycosat.solve(build_cnf(state))) is list
 
 
 def get_difference(state):
